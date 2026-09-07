@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ruz — Write Rust like Python</title>
+  <meta name="description" content="ruz runs single-file Rust scripts with embedded dependencies. Zero scaffolding, shared dependency cache, compiler-grade error messages in 0.2s. For AI agents and humans.">
+  <meta name="theme-color" content="#efe8dc">
+  <link rel="icon" type="image/svg+xml" href="icons/icon-r.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #efe8dc;
+      --paper: #f7f2e8;
+      --ink: #1a1612;
+      --muted: #5c5348;
+      --faint: #8a7f70;
+      --rule: #d4cbb8;
+      --rust: #b7410e;
+      --rust-deep: #93310b;
+      --term: #231e18;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; overflow-x: hidden; }
+    body {
+      margin: 0; overflow-x: hidden;
+      background: var(--bg); color: var(--ink);
+      font-family: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+      font-size: 18px; line-height: 1.5;
+      background-image: repeating-linear-gradient(to bottom, transparent, transparent 27px, rgba(26,22,18,0.035) 28px);
+    }
+    a { color: inherit; text-decoration: none; }
+    a:hover { color: var(--rust); }
+    code, pre, button, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .page { width: min(1040px, calc(100% - 40px)); margin: 0 auto; padding-bottom: 48px; }
+
+    .running {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+      padding: 18px 0 12px;
+      font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--faint); border-bottom: 1px solid var(--ink);
+    }
+    .running .id { display: inline-flex; align-items: center; gap: 8px; }
+    .running nav { display: flex; gap: 16px; text-transform: none; letter-spacing: 0; }
+    .running a { color: var(--ink); }
+
+    .hero { padding: 20px 0 8px; }
+    .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--rust-deep); }
+    h1 {
+      margin: 8px 0 10px;
+      font-size: clamp(34px, 4.8vw, 54px); font-weight: 600;
+      letter-spacing: -1.8px; line-height: 0.98; max-width: 16ch;
+    }
+    .lede { max-width: 52ch; font-size: 17px; color: var(--muted); }
+    .install {
+      margin-top: 22px; display: flex; align-items: stretch; min-width: 0; max-width: 640px;
+      border: 1px solid var(--ink); background: var(--term);
+    }
+    .install code {
+      flex: 1; min-width: 0; display: flex; align-items: center;
+      padding: 14px 16px; font-size: 12.5px; overflow-x: auto; white-space: nowrap; color: #f7f2e8;
+    }
+    .install .prompt { flex-shrink: 0; margin-right: 10px; color: #fdba74; }
+    .install button {
+      appearance: none; background: transparent; color: #f7f2e8;
+      border: 0; border-left: 1px solid #3d362c; cursor: pointer;
+      padding: 0 16px; font-size: 12px;
+    }
+    .install button:hover { background: var(--rust-deep); color: #fff7ed; }
+    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 18px; }
+    .cta a.fill {
+      display: inline-flex; align-items: center; height: 50px; padding: 0 24px; line-height: 1;
+      background: var(--rust); color: #fff7ed; border: 1px solid var(--ink);
+      font-family: "IBM Plex Mono", monospace; font-size: 15px; font-weight: 500;
+    }
+    .cta a.fill:hover { background: var(--rust-deep); }
+    .cta .quiet { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); }
+
+    figure { margin: 42px 0 0; border-top: 1px solid var(--ink); padding-top: 10px; }
+    figcaption {
+      display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+      letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint);
+      padding-bottom: 12px;
+    }
+    figcaption b { color: var(--ink); font-weight: 500; }
+
+    .split { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; align-items: start; }
+    @media (max-width: 840px) { .split { grid-template-columns: 1fr; } }
+    pre.script {
+      margin: 0; background: var(--term); color: #e7ddc9;
+      border: 1px solid var(--ink); padding: 18px 18px; font-size: 12.5px; line-height: 1.65;
+      overflow-x: auto; tab-size: 4;
+    }
+    pre.script .cm { color: #8a7f70; }
+    pre.script .sec { color: #fdba74; }
+    pre.script .kw { color: #f0c674; }
+    pre.script .str { color: #a9c68f; }
+    .annotations { font-size: 14.5px; color: var(--muted); }
+    .annotations div { padding: 8px 0; border-bottom: 1px solid var(--rule); }
+    .annotations div:last-child { border-bottom: 0; }
+    .annotations .n {
+      font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--rust-deep);
+      margin-right: 8px;
+    }
+
+    .bars { border: 1px solid var(--ink); background: var(--paper); padding: 16px 18px 10px; }
+    .bar-row { display: grid; grid-template-columns: 150px 1fr 76px; gap: 10px; align-items: center; padding: 7px 0; }
+    .bar-row .lab { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+    .bar-row .track { height: 15px; background: transparent; border-left: 1px solid var(--rule); position: relative; }
+    .bar-row .fillb { position: absolute; inset: 0 auto 0 0; background: var(--rust); }
+    .bar-row.py .fillb { background: var(--faint); }
+    .bar-row .val { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; text-align: right; color: var(--ink); }
+    .legend { display: flex; gap: 18px; padding: 10px 0 4px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+    .chip { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
+
+    .cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+    @media (max-width: 840px) { .cols3 { grid-template-columns: 1fr; } }
+    .cell { border: 1px solid var(--ink); background: var(--paper); padding: 16px 18px; }
+    .cell h3 { margin: 0 0 8px; font-size: 17px; }
+    .cell p { margin: 0; font-size: 14.5px; color: var(--muted); }
+    .cell .big { font-family: "IBM Plex Mono", monospace; font-size: 26px; font-weight: 500; color: var(--rust-deep); margin-bottom: 6px; }
+
+    .usage { border: 1px solid var(--ink); }
+    .usage .row { display: grid; grid-template-columns: 320px 1fr; border-bottom: 1px solid var(--rule); }
+    .usage .row:last-child { border-bottom: 0; }
+    .usage .cmd {
+      font-family: "IBM Plex Mono", monospace; font-size: 12.5px; padding: 12px 16px;
+      background: var(--term); color: #f7f2e8; white-space: nowrap; overflow-x: auto;
+    }
+    .usage .cmd .c { color: #fdba74; }
+    .usage .desc { padding: 12px 16px; font-size: 14.5px; color: var(--muted); }
+    @media (max-width: 720px) { .usage .row { grid-template-columns: 1fr; } }
+
+    footer {
+      margin-top: 52px; border-top: 1px solid var(--ink); padding: 18px 0 0;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+      font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--faint);
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <div class="running">
+    <span class="id">RUZ — SINGLE-FILE RUST SCRIPTS</span>
+    <nav>
+      <a href="#fig-1">How</a>
+      <a href="#fig-2">Loops</a>
+      <a href="#fig-3">Benchmarks</a>
+      <a href="https://github.com/spraylee/ruz">GitHub ↗</a>
+    </nav>
+  </div>
+
+  <section class="hero">
+    <div class="eyebrow">FOR AI AGENTS AND HUMANS · LINUX / MACOS</div>
+    <h1>Write Rust like&nbsp;Python.</h1>
+    <p class="lede">
+      One file, dependencies embedded, zero scaffolding. ruz compiles it, caches
+      everything it builds, and runs it — so the AI loop of
+      <em>write → run → fix → rerun</em> costs the same as Python, and computes up to 73× faster.
+    </p>
+    <div class="install">
+      <code><span class="prompt">$</span>curl -fsSL https://ruz.spraylee.com/i | sh</code>
+      <button id="copy" aria-label="copy install command">copy</button>
+    </div>
+    <div class="cta">
+      <a class="fill" href="https://github.com/spraylee/ruz#readme">Get started</a>
+      <span class="quiet">needs python3 + cargo · MIT</span>
+    </div>
+  </section>
+
+  <figure id="fig-1">
+    <figcaption><span><b>FIG. 1</b> — THE WHOLE PROGRAM</span><span>DEPENDENCIES LIVE IN THE FILE</span></figcaption>
+    <div class="split">
+      <pre class="script"><span class="cm">#!/usr/bin/env cargo</span>
+<span class="sec">---</span>
+<span class="kw">[package]</span>
+name = <span class="str">"fetch"</span>
+edition = <span class="str">"2024"</span>
+<span class="kw">[dependencies]</span>
+reqwest = { version = <span class="str">"0.12"</span>, features = [<span class="str">"blocking"</span>] }
+<span class="sec">---</span>
+fn main() {
+    let body = reqwest::blocking::get(
+        <span class="str">"https://httpbin.org/get"</span>)
+        .unwrap().text().unwrap();
+    println!<span class="kw">({}</span>, &amp;body[..80.min(body.len())]<span class="kw">)</span>;
+}</pre>
+      <div class="annotations">
+        <div><span class="n">01</span>Shebang marks it a cargo single-file package (RFC 3502) — future cargo stable runs it natively.</div>
+        <div><span class="n">02</span>The manifest block: your deps travel with the script. No Cargo.toml, no project dir.</div>
+        <div><span class="n">03</span>Just Rust. Anything on crates.io works.</div>
+        <div><span class="n">04</span>Run it: <span class="mono" style="font-size:13px">ruz run fetch.rs</span> — first run compiles, every run after is ~0.3s.</div>
+      </div>
+    </div>
+  </figure>
+
+  <figure id="fig-2">
+    <figcaption><span><b>FIG. 2</b> — THE LOOP THAT MATTERS</span><span>MEASURED ON XEON 8255C · 2026-09</span></figcaption>
+    <div class="cols3">
+      <div class="cell">
+        <div class="big">0.2s</div>
+        <h3>Error feedback</h3>
+        <p>rustc diagnostics return in ~0.2s with line numbers and the fix spelled out. The borrow-checker teaches; the model listens.</p>
+      </div>
+      <div class="cell">
+        <div class="big">0.3–0.7s</div>
+        <h3>Edit &amp; rerun</h3>
+        <p>Change a few lines, rerun: 0.13–0.6s. Brand-new script on warm deps: 0.7s. Deps compile once, shared across all scripts.</p>
+      </div>
+      <div class="cell">
+        <div class="big">1.1×</div>
+        <h3>Rounds to green</h3>
+        <p>In a 22-script benchmark session, fix-rounds averaged 1.13 (Python) vs 1.14 (Rust). The compiler catches what Python defers to runtime.</p>
+      </div>
+    </div>
+  </figure>
+
+  <figure id="fig-3">
+    <figcaption><span><b>FIG. 3</b> — WHERE IT WINS (AND WHERE IT DOESN'T)</span><span>SHORTER BAR = FASTER, NORMALIZED</span></figcaption>
+    <div class="bars">
+      <div class="legend">
+        <span><span class="chip" style="background:var(--rust)"></span>ruz (Rust, -O3)</span>
+        <span><span class="chip" style="background:var(--faint)"></span>python3 (CPython)</span>
+      </div>
+      <div class="bar-row"><span class="lab">mandelbrot</span><span class="track"><span class="fillb" style="width:1.4%"></span></span><span class="val">73× 🦀</span></div>
+      <div class="bar-row py"><span class="lab">↳ python</span><span class="track"><span class="fillb" style="width:100%"></span></span><span class="val">6.92s</span></div>
+      <div class="bar-row"><span class="lab">20 × https</span><span class="track"><span class="fillb" style="width:29%"></span></span><span class="val">3.4× 🦀</span></div>
+      <div class="bar-row py"><span class="lab">↳ python</span><span class="track"><span class="fillb" style="width:100%"></span></span><span class="val">20.0s</span></div>
+      <div class="bar-row"><span class="lab">40MB log scan</span><span class="track"><span class="fillb" style="width:33%"></span></span><span class="val">3.0× 🦀</span></div>
+      <div class="bar-row py"><span class="lab">↳ python</span><span class="track"><span class="fillb" style="width:100%"></span></span><span class="val">391ms</span></div>
+      <div class="bar-row"><span class="lab">sha-256 22MB</span><span class="track"><span class="fillb" style="width:100%"></span></span><span class="val">🐍 wins</span></div>
+      <div class="bar-row py"><span class="lab">↳ python</span><span class="track"><span class="fillb" style="width:52%"></span></span><span class="val">57ms</span></div>
+    </div>
+    <p style="font-size:14.5px;color:var(--muted);margin:14px 0 0">
+      Honest numbers both ways: Python's hashlib/OpenSSL (C underneath) keeps the crypto crown;
+      JSON parsing ties; compute, batching and text pipelines belong to Rust. Pick per task — ruz makes the Rust side cheap.
+    </p>
+  </figure>
+
+  <figure>
+    <figcaption><span><b>FIG. 4</b> — SIX COMMANDS, THAT'S THE TOOL</span><span>RUN / CHECK / WARM / NEW / DOCTOR / CACHE</span></figcaption>
+    <div class="usage">
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz run fetch.rs --verbose</div><div class="desc">Compile if needed, then execute. Args pass through. Exit code is the script's.</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz check fetch.rs</div><div class="desc">Fast type &amp; borrow check, no binary produced. Ideal pre-flight for agents.</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz warm serde:derive reqwest:blocking</div><div class="desc">Pre-compile crates into the shared cache once; every future script starts warm.</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz new demo.rs</div><div class="desc">Scaffold a script with edition pinned (no warnings).</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz doctor</div><div class="desc">Environment check: python3, cargo, -Zscript path, nightly fallback.</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz cache</div><div class="desc">Where the cache lives and how big it is. Delete the dir to reset.</div></div>
+    </div>
+  </figure>
+
+  <footer>
+    <span>RUZ v0.1.1 · MIT · SPRAYLEE</span>
+    <span>GITHUB.COM/SPRAYLEE/RUZ · LINUX / MACOS</span>
+  </footer>
+</div>
+
+<script>
+  const btn = document.getElementById('copy');
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText('curl -fsSL https://ruz.spraylee.com/i | sh');
+      btn.textContent = 'copied';
+      setTimeout(() => btn.textContent = 'copy', 1400);
+    } catch (e) { btn.textContent = 'ctrl-c'; }
+  });
+</script>
+</body>
+</html>
