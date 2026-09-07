@@ -40,7 +40,7 @@ import subprocess
 import sys
 import tempfile
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 ROOT = os.path.expanduser("~/.cache/ruz")
 TARGET_DIR = os.path.join(ROOT, "target")
