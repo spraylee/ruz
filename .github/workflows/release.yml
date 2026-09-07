@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing or new SemVer tag to build, for example v0.1.0"
+        required: true
+        default: "v0.1.0"
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Package and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity check ruz runs
+        run: |
+          python3 ruz --version
+          python3 ruz doctor || true
+
+      - name: Package assets
+        run: |
+          mkdir -p dist
+          cp ruz dist/ruz
+          cp scripts/bootstrap.sh dist/bootstrap.sh
+          cd dist
+          sha256sum ruz bootstrap.sh > SHA256SUMS
+
+      - name: Create release and upload
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ruz ${{ env.RELEASE_TAG }}
+          body: |
+            # ruz ${{ env.RELEASE_TAG }}
+
+            Install:
+
+            ```sh
+            curl -fsSL https://ruz.spraylee.com/i | sh
+            ```
+
+            Changes: see https://github.com/spraylee/ruz/releases (commit log).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

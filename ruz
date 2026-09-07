@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""ruz — single-file Rust script runner for AI agents.
+
+Write Rust like you write Python: one file, embedded deps, zero scaffolding.
+
+Usage:
+    ruz run <file.rs> [args...]     # compile if needed, then execute
+    ruz check <file.rs>             # fast type/borrow check, no codegen
+    ruz warm <crate[:feature]...>   # pre-compile crates into the shared cache
+    ruz new [name.rs]               # scaffold a script
+    ruz cache                       # show cache location and size
+    ruz doctor                      # diagnose environment (python/cargo/nightly)
+
+Script format (RFC 3502 single-file packages):
+
+    #!/usr/bin/env cargo
+    ---
+    [package]
+    name = "hello"
+    edition = "2024"
+    [dependencies]
+    regex = "1"
+    ---
+    fn main() { ... }
+
+How it works:
+    - cargo's built-in single-file packages (-Zscript)
+    - RUSTC_BOOTSTRAP=1 lets stable cargo accept -Zscript; if that ever
+      stops working, falls back to `cargo +nightly` automatically
+    - shared CARGO_TARGET_DIR + CARGO_HOME: dependencies compiled once are
+      reused by every later script
+    - opt-level=3 by default (debug profile is 10-20x slower on compute;
+      measured: sha256 22MB debug 1.5s vs O3 0.13s)
+"""
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+__version__ = "0.1.0"
+
+ROOT = os.path.expanduser("~/.cache/ruz")
+TARGET_DIR = os.path.join(ROOT, "target")
+MODE_FILE = os.path.join(ROOT, "cargo-mode")
+
+ENV = dict(os.environ)
+ENV["CARGO_TARGET_DIR"] = TARGET_DIR
+ENV["RUSTC_BOOTSTRAP"] = "1"
+ENV.setdefault("CARGO_HOME", os.path.join(ROOT, "cargo-home"))
+ENV.setdefault("CARGO_PROFILE_DEV_OPT_LEVEL", "3")
+ENV.setdefault("CARGO_PROFILE_DEV_DEBUG", "0")
+
+
+def die(msg, code=1):
+    print(f"ruz: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def ensure_dirs():
+    os.makedirs(TARGET_DIR, exist_ok=True)
+
+
+def read_mode():
+    try:
+        with open(MODE_FILE) as f:
+            m = f.read().strip()
+        return m if m in ("stable", "nightly") else None
+    except OSError:
+        return None
+
+
+def write_mode(m):
+    os.makedirs(ROOT, exist_ok=True)
+    with open(MODE_FILE, "w") as f:
+        f.write(m)
+
+
+def cargo(argv, capture=False):
+    """Run cargo in the right mode. Falls back to +nightly when stable
+    rejects -Zscript (RUSTC_BOOTSTRAP hack defeated by a future cargo)."""
+    mode = read_mode() or "stable"
+    cmd = ["cargo"] + (["+nightly"] if mode == "nightly" else []) + argv
+    if capture:
+        r = subprocess.run(cmd, env=ENV, capture_output=True, text=True)
+    else:
+        r = subprocess.run(cmd, env=ENV)
+    if r.returncode != 0 and mode == "stable":
+        err = (r.stderr or "") if capture else ""
+        if capture and ("nightly" in err.lower() or "-zscript" in err.lower()):
+            write_mode("nightly")
+            cmd = ["cargo", "+nightly"] + argv
+            r = subprocess.run(cmd, env=ENV, capture=capture, text=capture)
+    return r
+
+
+def require_script(argv, usage):
+    if not argv:
+        die(f"usage: {usage}")
+    script = argv[0]
+    if not os.path.isfile(script):
+        die(f"file not found: {script}")
+    return script
+
+
+def cmd_run(argv):
+    require_script(argv, "ruz run <file.rs> [args...]")
+    ensure_dirs()
+    r = cargo(["-Zscript", argv[0], *argv[1:]])
+    return r.returncode
+
+
+def cmd_check(argv):
+    require_script(argv, "ruz check <file.rs>")
+    ensure_dirs()
+    r = cargo(["-Zscript", "check", "--manifest-path", argv[0]], capture=True)
+    if r.returncode == 0:
+        print(f"ok: {argv[0]} compiles clean")
+    else:
+        sys.stderr.write(r.stderr or r.stdout)
+    return r.returncode
+
+
+def cmd_warm(argv):
+    if not argv:
+        die("usage: ruz warm <crate[:feature]...>")
+    ensure_dirs()
+    deps_lines = []
+    for tok in argv:
+        if ":" in tok:
+            crate, feat = tok.split(":", 1)
+            deps_lines.append(f'{crate} = {{ version = "*", features = ["{feat}"] }}')
+        else:
+            deps_lines.append(f'{tok} = "*"')
+    src = (
+        "#!/usr/bin/env cargo\n---\n[package]\nname = \"warmup\"\n"
+        "[dependencies]\n" + "\n".join(deps_lines) + "\n---\n"
+        "fn main() {}\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".rs", delete=False, dir=ROOT
+    ) as f:
+        f.write(src)
+        path = f.name
+    print(f"warming: {', '.join(argv)} (first time can take a while)")
+    r = subprocess.run(["cargo", "-Zscript", path], env=ENV) if read_mode() != "nightly" else subprocess.run(["cargo", "+nightly", "-Zscript", path], env=ENV)
+    os.unlink(path)
+    if r.returncode == 0:
+        print("warm ok - future scripts using these crates start fast")
+    return r.returncode
+
+
+TPL = """#!/usr/bin/env cargo
+---
+[package]
+name = "{name}"
+edition = "2024"
+[dependencies]
+---
+fn main() {{
+    // args: std::env::args().skip(1)
+    println!("Hello from {name}!");
+}}
+"""
+
+
+def cmd_new(argv):
+    name = argv[0] if argv else "script.rs"
+    if not name.endswith(".rs"):
+        name += ".rs"
+    if os.path.exists(name):
+        die(f"refusing to overwrite {name}")
+    pkg = os.path.splitext(os.path.basename(name))[0].replace("-", "_")
+    with open(name, "w") as f:
+        f.write(TPL.format(name=pkg))
+    print(f"created {name} - run with: ruz run {name}")
+    return 0
+
+
+def du(path):
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for fn in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, fn))
+            except OSError:
+                pass
+    return total
+
+
+def cmd_cache(argv):
+    print(f"cache root : {ROOT}")
+    for sub in ("target", "cargo-home"):
+        p = os.path.join(ROOT, sub)
+        if os.path.isdir(p):
+            print(f"  {sub:10s}: {du(p) / 1e9:.2f} GB")
+    print(f"cargo mode : {read_mode() or 'stable (unprobed)'}")
+    return 0
+
+
+def cmd_doctor(argv):
+    print(f"ruz        : v{__version__} ({os.path.abspath(__file__)})")
+    py = sys.version.split()[0]
+    print(f"python     : {py}")
+    cargo_bin = shutil.which("cargo")
+    if not cargo_bin:
+        print("cargo      : MISSING (install with https://rustup.rs)")
+        return 1
+    ver = subprocess.run(["cargo", "--version"], capture_output=True, text=True).stdout.strip()
+    print(f"cargo      : {ver}")
+    r = subprocess.run(
+        ["cargo", "-Zscript", "--version"], env=ENV, capture_output=True, text=True
+    )
+    if r.returncode == 0:
+        print("stable -Zscript: OK (RUSTC_BOOTSTRAP hack works)")
+        if read_mode() != "stable":
+            write_mode("stable")
+    else:
+        r2 = subprocess.run(
+            ["cargo", "+nightly", "-Zscript", "--version"],
+            env=ENV, capture_output=True, text=True,
+        )
+        if r2.returncode == 0:
+            print("stable -Zscript: rejected, nightly fallback: OK")
+            write_mode("nightly")
+        else:
+            print("stable -Zscript: rejected; nightly: MISSING (rustup toolchain install nightly)")
+            return 1
+    print(f"cache      : {ROOT}")
+    return 0
+
+
+COMMANDS = {
+    "run": cmd_run,
+    "check": cmd_check,
+    "warm": cmd_warm,
+    "new": cmd_new,
+    "cache": cmd_cache,
+    "doctor": cmd_doctor,
+}
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    if args[0] in ("-V", "--version"):
+        print(f"ruz {__version__}")
+        return 0
+    cmd, rest = args[0], args[1:]
+    fn = COMMANDS.get(cmd)
+    if fn is None:
+        die(f"unknown command: {cmd} (try {'/'.join(COMMANDS)})")
+    return fn(rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
