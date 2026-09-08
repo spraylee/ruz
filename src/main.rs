@@ -459,16 +459,6 @@ fn rewrite_package_name(src: &str, new_name: &str) -> Option<String> {
     Some(out)
 }
 
-fn inject_manifest(src: &str, new_name: &str) -> String {
-    let block = format!("---\n[package]\nname = \"{new_name}\"\n---\n");
-    if src.starts_with("#!") {
-        if let Some((line, rest)) = src.split_once('\n') {
-            return format!("{line}\n{block}{rest}");
-        }
-    }
-    format!("{block}{src}")
-}
-
 struct ScriptMeta {
     name: String,
     version: String,
@@ -544,24 +534,81 @@ fn parse_fp_line(line: &str) -> Option<[&str; 9]> {
     Some(parts)
 }
 
+// Resolve the *real* toolchain binaries behind rustup proxies without spawning
+// anything: `~/.cargo/bin/rustc` is a symlink to `rustup`, which dispatches on
+// argv[0]; statting the proxy tells us nothing about the actual toolchain
+// (rustup self-update or `rustup default` swaps the target silently).
+fn real_toolchain_paths(proxy_rustc: &Path, proxy_cargo: &Path) -> (PathBuf, PathBuf, String) {
+    // RUSTUP_TOOLCHAIN override wins; else parse ~/.rustup/settings.toml
+    let override_tc = env::var("RUSTUP_TOOLCHAIN").ok().filter(|s| !s.is_empty());
+    let (rustc_real, cargo_real, tc_tag) = if let Some(tc) = override_tc {
+        (
+            rustup_toolchain_bin(&tc, "rustc"),
+            rustup_toolchain_bin(&tc, "cargo"),
+            format!("override:{tc}"),
+        )
+    } else {
+        let settings = home_dir().join(".rustup").join("settings.toml");
+        let text = fs::read_to_string(&settings).unwrap_or_default();
+        let tc = text
+            .lines()
+            .find_map(|l| l.strip_prefix("default_toolchain = "))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .unwrap_or_default();
+        if tc.is_empty() {
+            // not a rustup layout — stat the proxies themselves
+            (
+                proxy_rustc.to_path_buf(),
+                proxy_cargo.to_path_buf(),
+                "direct".to_string(),
+            )
+        } else {
+            (
+                rustup_toolchain_bin(&tc, "rustc"),
+                rustup_toolchain_bin(&tc, "cargo"),
+                format!("rustup:{tc}"),
+            )
+        }
+    };
+    (rustc_real, cargo_real, tc_tag)
+}
+
+fn rustup_toolchain_bin(tc: &str, bin: &str) -> PathBuf {
+    home_dir()
+        .join(".rustup")
+        .join("toolchains")
+        .join(tc)
+        .join("bin")
+        .join(bin)
+}
+
 fn toolchain_fingerprint() -> Result<String, String> {
-    let rustc =
+    let proxy_rustc =
         find_in_path("rustc").ok_or_else(|| "rustc not found on PATH (run ruz doctor)".to_string())?;
-    let cargo =
+    let proxy_cargo =
         find_in_path("cargo").ok_or_else(|| "cargo not found on PATH (run ruz doctor)".to_string())?;
     let mode = read_mode().unwrap_or_else(|| "stable".to_string());
-    let rs = stat_bin(&rustc).map_err(|e| format!("stat rustc: {e}"))?;
-    let cs = stat_bin(&cargo).map_err(|e| format!("stat cargo: {e}"))?;
+    // stat the REAL toolchain binaries, not the rustup proxies; also fold in
+    // settings.toml's mtime so `rustup default` swaps invalidate the cache
+    let (rustc_real, cargo_real, tc_tag) = real_toolchain_paths(&proxy_rustc, &proxy_cargo);
+    let settings = home_dir().join(".rustup").join("settings.toml");
+    let settings_mtime = fs::metadata(&settings)
+        .map(|m| mtime_ns(&m).to_string())
+        .unwrap_or_else(|_| "none".into());
+    let rs = stat_bin(&rustc_real)
+        .map_err(|e| format!("stat rustc({}): {e}", rustc_real.display()))?;
+    let cs = stat_bin(&cargo_real)
+        .map_err(|e| format!("stat cargo({}): {e}", cargo_real.display()))?;
 
     if let Ok(existing) = fs::read_to_string(fp_file()) {
         let existing = existing.trim_end_matches('\n');
         if let Some(p) = parse_fp_line(existing) {
-            if p[0] == rustc.to_string_lossy().as_ref()
+            if p[0] == tc_tag
                 && p[1] == rs.mtime_ns.to_string()
                 && p[2] == rs.size.to_string()
-                && p[4] == cargo.to_string_lossy().as_ref()
-                && p[5] == cs.mtime_ns.to_string()
-                && p[6] == cs.size.to_string()
+                && p[4] == cs.mtime_ns.to_string()
+                && p[5] == cs.size.to_string()
+                && p[6] == settings_mtime
                 && p[8] == mode
             {
                 return Ok(existing.to_string());
@@ -569,17 +616,18 @@ fn toolchain_fingerprint() -> Result<String, String> {
         }
     }
 
-    let commit = rustc_commit(&rustc)?;
-    let cver = cargo_version_line(&cargo)?;
+    // spawn via the PATH proxies so rustup's argv[0] dispatch works
+    let commit = rustc_commit(&proxy_rustc)?;
+    let cver = cargo_version_line(&proxy_cargo)?;
     let line = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        rustc.display(),
+        tc_tag,
         rs.mtime_ns,
         rs.size,
         commit,
-        cargo.display(),
         cs.mtime_ns,
         cs.size,
+        settings_mtime,
         cver,
         mode
     );
@@ -754,22 +802,22 @@ fn cmd_run(argv: Vec<String>) -> i32 {
     )
 }
 
-enum NameAction {
-    Rewritten,
-    Injected,
-    Unchanged,
-}
-
-fn prepare_source(src: &str, new_name: &str, has_manifest: bool, has_name_line: bool) -> (String, NameAction) {
+// Returns (source-to-compile, was-name-rewritten). Scripts without a
+// manifest are copied verbatim — cargo -Zscript derives a unique package
+// name from the copy's filename (`<stem>-<key12>.rs`), so we never inject
+// lines and rustc line numbers stay identical to the user's original file.
+fn prepare_source(
+    src: &str,
+    new_name: &str,
+    has_manifest: bool,
+    has_name_line: bool,
+) -> (String, bool) {
     if has_manifest && has_name_line {
         if let Some(rewritten) = rewrite_package_name(src, new_name) {
-            return (rewritten, NameAction::Rewritten);
+            return (rewritten, true);
         }
     }
-    if !has_manifest {
-        return (inject_manifest(src, new_name), NameAction::Injected);
-    }
-    (src.to_string(), NameAction::Unchanged)
+    (src.to_string(), false)
 }
 
 fn compile_and_run(
@@ -784,10 +832,14 @@ fn compile_and_run(
     let key12 = &key[..12.min(key.len())];
     let stem = sanitize_stem(&file_stem_raw(script));
     let pkg = format!("ruz_{stem}_{key12}");
-    let (body, action) = prepare_source(src, &pkg, meta.has_manifest, meta.has_name_line);
+    let (body, name_rewritten) = prepare_source(src, &pkg, meta.has_manifest, meta.has_name_line);
 
+    // Copy name embeds the key: cargo derives a unique package name from the
+    // filename for manifest-less scripts (`ruz.<key12>-<stem>.rs` →
+    // `ruz-<key12>-<stem>`), so package collisions are impossible even when
+    // the user's manifest has no name line.
     let script_dir = script.parent().unwrap_or(Path::new("."));
-    let local_copy = script_dir.join(format!(".ruz.{key12}.rs"));
+    let local_copy = script_dir.join(format!("ruz.{key12}-{stem}.rs"));
     let (copy_path, is_local) = match atomic_write(&local_copy, body.as_bytes()) {
         Ok(()) => (local_copy, true),
         Err(_) => {
@@ -814,14 +866,18 @@ fn compile_and_run(
         }
     };
     if !outcome.status.success() {
+        if is_local {
+            let _ = fs::remove_file(&copy_path);
+        }
         return exit_code(outcome.status);
     }
 
-    let want = match action {
-        NameAction::Rewritten | NameAction::Injected => Some(pkg.as_str()),
-        NameAction::Unchanged => None,
-    };
-    let Some(artifact) = find_artifact(want, started) else {
+    // Deterministic artifact names: rewritten manifests produce
+    // `ruz_<stem>_<key12>`; manifest-less scripts get cargo's filename-derived
+    // name (`ruz.<key12>-<stem>.rs` → `ruz-<key12>-<stem>`).
+    let derived = format!("ruz-{key12}-{stem}");
+    let want = if name_rewritten { pkg.clone() } else { derived };
+    let Some(artifact) = find_artifact(Some(want.as_str()), started) else {
         if is_local {
             let _ = fs::remove_file(&copy_path);
         }
@@ -1254,12 +1310,12 @@ mod tests {
     }
 
     #[test]
-    fn inject_manifest_after_shebang() {
+    fn manifestless_copy_is_verbatim() {
+        // 无 manifest 脚本逐字节原样拷贝（不注入任何行）——rustc 行号与用户原文件一致
         let src = "#!/usr/bin/env cargo\nfn main() {}\n";
-        let out = inject_manifest(src, "ruz_s_0123456789ab");
-        assert!(out.starts_with("#!/usr/bin/env cargo\n---\n[package]\nname = \"ruz_s_0123456789ab\"\n---\n"));
-        assert!(out.contains("fn main() {}"));
-        assert!(split_front_matter(&out).is_some());
+        let (out, rewritten) = prepare_source(src, "ruz_s_0123456789ab", false, false);
+        assert_eq!(out, src);
+        assert!(!rewritten);
     }
 
     #[test]

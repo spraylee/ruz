@@ -194,7 +194,7 @@ fn main() {
         <div><span class="n">01</span>Shebang marks it a cargo single-file package (RFC 3502) — future cargo stable runs it natively.</div>
         <div><span class="n">02</span>The manifest block: your deps travel with the script. No Cargo.toml, no project dir.</div>
         <div><span class="n">03</span>Just Rust. Anything on crates.io works.</div>
-        <div><span class="n">04</span>Run it: <span class="mono" style="font-size:13px">ruz run fetch.rs</span> — first no-dep compile ~0.19s; unchanged rerun is a 3ms execve.</div>
+        <div><span class="n">04</span>Run it: <span class="mono" style="font-size:13px">ruz run fetch.rs</span> — first no-dep compile ~0.19s; unchanged rerun is a 2ms execve.</div>
       </div>
     </div>
   </figure>
@@ -210,7 +210,7 @@ fn main() {
       <div class="cell">
         <div class="big">3ms</div>
         <h3>Hot rerun</h3>
-        <p>Unchanged script: 3.04ms p50 via execve. Edit a line and rebuild: 108ms. First no-dep compile: 192ms. Deps compile once, shared across all scripts.</p>
+        <p>Unchanged script: 1.8ms p50 via execve. Edit a line and rebuild: ~0.13s. First no-dep compile: ~0.19s. Deps compile once, shared across all scripts.</p>
       </div>
       <div class="cell">
         <div class="big">1.1×</div>

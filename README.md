@@ -68,16 +68,16 @@ ruz cache              # 缓存位置与大小
 | 40MB 文本流水线 | 391ms | **130ms** | ruz 3x |
 | SHA-256 / AES 大块 | **57ms** | 110ms | python（OpenSSL）|
 
-启动器热路径（无依赖 `hello`，`scripts/selftest.sh` 本机实测）：
+启动器热路径（无依赖 `hello`，本机 Linux Xeon 8255C 实测，2026-09-08）：
 
 | 档 | 墙钟 | 说明 |
 |---|---|---|
-| 首次编译 | **192ms** | `cargo -Zscript build` + 登记缓存 + execve |
-| 改一行重编 | **108ms** | 内容哈希变了，再走 cargo |
-| 热直跑 p50 | **3.04ms** | 20 次；strace 只有一次对缓存二进制的 execve，无 cargo |
+| 首次编译+跑 | **~0.19s** | `cargo -Zscript build` + 登记缓存 + execve |
+| 改一行重编+跑 | **~0.13s** | 内容哈希变了，再走 cargo |
+| 热直跑 p50 | **1.8ms** | 30 次；strace 只有一次对缓存二进制的 execve，无 cargo 子进程 |
 | v0.1.1 热路径（对照） | 71ms | 每次 Python + `cargo -Zscript` |
 
-**AI 迭代循环**：没改文件再跑是 3ms 级；改一行重编约 0.11s。修复轮次实测与 Python 打平（rustc 报错自带答案）。
+**AI 迭代循环**：没改文件再跑是 2ms 级；改一行重编约 0.13s。修复轮次实测与 Python 打平（rustc 报错自带答案）。
 
 ## 架构（v0.2.0）
 
@@ -86,8 +86,9 @@ ruz cache              # 缓存位置与大小
 - **内容哈希主键**：`sha256(scheme ‖ 脚本全文 ‖ 工具链边车 ‖ RUSTFLAGS/opt/debug)`。改脚本任意字节、换 rustc、改 `RUSTFLAGS` 都会换 key。
 - **工具链边车**：`~/.cache/ruz/toolchain.fp` 缓存 rustc/cargo 的路径、mtime、尺寸、commit-hash。热路径只 `stat` 二进制，不 spawn `rustc -vV`。
 - **直跑**：key 命中 `~/.cache/ruz/bin/<key>/exe` 时 `execve`，参数原样透传，退出码即脚本退出码。
-- **包名归一化**：未命中时把副本的 `package.name` 改成 `ruz_<stem>_<key12>`，再 `cargo -Zscript build`。共享 `CARGO_TARGET_DIR` 仍然复用依赖，但 fingerprint 不再因两个 `hello` 撞车。
-- **相对路径**：编译副本写在脚本同目录 `.ruz.<key12>.rs`，`include_str!` / `include!` 语义与手写脚本一致。
+- **包名归一化**：未命中时把副本的 `package.name` 改成 `ruz_<stem>_<key12>`，再 `cargo -Zscript build`。共享 `CARGO_TARGET_DIR` 仍然复用依赖，但 fingerprint 不再因两个 `hello` 撞车。无 manifest 的脚本逐字节拷贝（副本名 `ruz.<key12>-<stem>.rs`，cargo 自动派生唯一包名），rustc 报错行号与你的原文件完全一致。
+- **相对路径**：编译副本写在脚本同目录，`include_str!` / `include!` 语义与手写脚本一致。
+- **工具链感知**：指纹 stat 的是 rustup 真实工具链二进制（非代理软链），`rustup default` 切换、`RUSTUP_TOOLCHAIN` 覆盖都会换 key 重编，不会跑到旧二进制。
 
 ## For AI agents
 
