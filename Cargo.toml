@@ -1,0 +1,17 @@
+[package]
+name = "ruz"
+version = "0.2.0"
+edition = "2021"
+description = "single-file Rust script runner for AI agents"
+license = "MIT"
+repository = "https://github.com/spraylee/ruz"
+homepage = "https://ruz.spraylee.com"
+readme = "README.md"
+publish = false
+
+[dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
