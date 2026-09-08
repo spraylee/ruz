@@ -91,17 +91,15 @@ jobs:
             exit 1
           fi
           if command -v ldd >/dev/null 2>&1; then
-            if ldd "$bin" >/tmp/ldd.out 2>&1; then
-              if grep -qi 'not a dynamic' /tmp/ldd.out; then
-                echo "ldd: not a dynamic executable"
-              else
-                echo "ldd unexpectedly succeeded for static binary:" >&2
-                cat /tmp/ldd.out >&2
-                exit 1
-              fi
+            ldd "$bin" >/tmp/ldd.out 2>&1 || true
+            # new ldd prints "statically linked" (exit 0); old ldd errors
+            # with "not a dynamic executable". Both are static-binary OK.
+            if grep -Eiq 'statically linked|not a dynamic' /tmp/ldd.out; then
+              echo "ldd confirms static: $(cat /tmp/ldd.out)"
             else
-              echo "ldd failed as expected for static binary"
-              cat /tmp/ldd.out || true
+              echo "ldd output unexpected for a static binary:" >&2
+              cat /tmp/ldd.out >&2
+              exit 1
             fi
           fi
 
