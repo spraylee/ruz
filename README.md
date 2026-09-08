@@ -69,8 +69,9 @@ ruz cache              # 缓存位置与大小
 
 ## For AI agents
 
-This repo ships a skill (root `SKILL.md`) and a live-docs endpoint, so agents
-never rely on stale instructions:
+This repo ships a skill (`skills/ruz/SKILL.md`) and a live-docs endpoint, so
+agents never rely on stale instructions. Installing pulls in **only** the thin
+skill file — not the repo:
 
 ```sh
 npx skills add spraylee/ruz -g            # install the thin-pointer skill
