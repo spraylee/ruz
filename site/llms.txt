@@ -1,0 +1,108 @@
+# ruz
+
+> Single-file Rust scripts for AI agents — write Rust like Python: one file,
+> embedded dependencies, zero scaffolding. Shared dep cache, default O3,
+> error messages that teach. 10–70x faster than Python on CPU-bound work.
+
+Docs: https://ruz.spraylee.com
+GitHub: https://github.com/spraylee/ruz
+Skill: npx skills add spraylee/ruz
+
+## Install
+
+- One line (Linux/macOS, needs only `cargo` on PATH):
+  `curl -fsSL https://ruz.spraylee.com/i | sh`
+- Or from GitHub Release:
+  `curl -fsSL https://github.com/spraylee/ruz/releases/latest/download/bootstrap.sh | sh`
+- Installs a small static Rust binary (4 platform targets) to `~/.local/bin/ruz`
+
+## Script format (RFC 3502 single-file packages)
+
+```rust
+#!/usr/bin/env cargo
+---
+[package]
+name = "fetch"
+edition = "2024"
+[dependencies]
+reqwest = { version = "0.12", features = ["blocking"] }
+---
+fn main() {
+    let body = reqwest::blocking::get("https://httpbin.org/get").unwrap().text().unwrap();
+    println!("{}", &body[..80.min(body.len())]);
+}
+```
+
+Run it: `ruz run fetch.rs`
+Structure: shebang → TOML front matter (`[package]` + `[dependencies]`)
+between `---` fences → Rust code. One file; no Cargo.toml, no project dir,
+no git init. Manifest is optional — a bare `fn main()` file works too.
+
+## Commands
+
+```
+ruz new demo.rs        # scaffold from template
+ruz run demo.rs args…  # cache hit → execve cached binary; miss → compile then run
+ruz check demo.rs      # fast type/borrow check, no codegen — cheap iteration
+ruz warm serde:derive reqwest:blocking regex  # pre-compile deps into cache
+ruz doctor             # environment checkup (cargo / -Zscript / nightly)
+ruz cache              # cache location and size
+```
+
+## How it works (v0.2.0)
+
+- `ruz` itself is a std-only Rust static binary — no Python in the path.
+- Hot `run` keys on `sha256(script bytes ‖ toolchain sidecar ‖ RUSTFLAGS ‖
+  profile)`. On a hit it `execve`s the cached binary directly: **no cargo
+  spawn, ~2ms p50**. Args pass through; exit code is the script's.
+- Toolchain sidecar `~/.cache/ruz/toolchain.fp` stats the *real* toolchain
+  binaries (rustup-layout aware, `rustup default` swaps and
+  `RUSTUP_TOOLCHAIN` overrides change the key) — a rustc upgrade never runs
+  a stale binary.
+- Cache miss → package name rewritten to `ruz_<stem>_<hash12>`, then
+  `cargo -Zscript build`. The shared `CARGO_TARGET_DIR` keeps reusing
+  compiled deps, while two scripts both named `hello` no longer collide on
+  fingerprints. Manifest-less scripts are copied verbatim (line numbers in
+  rustc errors match your original file exactly).
+- Manifest-less or not, the compile copy lives next to your script, so
+  `include_str!` / `include!` relative paths behave as written.
+- Builds default to O3 — avoids the debug-profile 10–20x performance trap.
+- `ruz check` returns rustc diagnostics in ~0.2s with line numbers and fix
+  suggestions; measured fix-iteration count is on par with Python.
+
+## Launcher timings (Xeon 8255C, Linux, rustc 1.98.0, 2026-09-08)
+
+| Stage | Wall time |
+|---|---|
+| First compile + run (no deps) | ~0.19s |
+| Edit one line, rebuild + run | ~0.13s |
+| Unchanged rerun (hot path) p50 | **1.8ms** |
+| v0.1.1 unchanged rerun (was) | 71ms |
+
+strace proof: hot path is exactly 2 execve calls (ruz → cached exe), zero
+cargo spawns.
+
+## Benchmarks (Xeon 8255C, Linux, 2026-09)
+
+| Task | python3 | ruz (O3) | Winner |
+|---|---|---|---|
+| Mandelbrot pure compute | 6.92s | 0.095s | ruz 73x |
+| Batch 20 HTTPS fetches | 20.0s | 5.8s | ruz 3.4x |
+| 40MB text pipeline | 391ms | 130ms | ruz 3x |
+| SHA-256 / AES large blocks | 57ms | 110ms | python (OpenSSL) |
+
+Rule of thumb for agents: CPU-bound temp code → ruz; crypto on big blocks or
+quick glue → Python is fine.
+
+## Limits
+
+- Windows not supported (design boundary, not a bug).
+- All scripts share one dep cache (`ruz cache` shows it) — blow it away if a
+  dependency graph ever behaves weirdly.
+
+## For AI agents
+
+- Install the thin-pointer skill: `npx skills add spraylee/ruz -g`
+- This file is the always-fresh reference — fetch it at runtime instead of
+  trusting cached instructions:
+  `curl -fsSL https://ruz.spraylee.com/llms.txt`
