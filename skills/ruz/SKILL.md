@@ -6,13 +6,13 @@ name: ruz
 
 # ruz — single-file Rust scripts for AI agents
 
-**One-line install** (Linux/macOS; needs `python3` + `cargo` on PATH):
+**One-line install** (Linux/macOS; needs `cargo` on PATH):
 
 ```sh
 curl -fsSL https://ruz.spraylee.com/i | sh
 ```
 
-Installs to `~/.local/bin/ruz` (single-file Python launcher).
+Installs to `~/.local/bin/ruz` (small static binary).
 
 ## Script format (RFC 3502 single-file packages)
 
@@ -41,7 +41,7 @@ ruz new demo.rs        # scaffold from template
 ruz run demo.rs args…  # compile if needed (shared dep cache), then execute
 ruz check demo.rs      # fast type/borrow check, no codegen — cheap iteration
 ruz warm serde:derive reqwest:blocking regex  # pre-compile deps into the cache
-ruz doctor             # environment checkup (python/cargo/nightly)
+ruz doctor             # environment checkup (cargo / -Zscript / nightly)
 ruz cache              # cache location and size
 ```
 
@@ -51,7 +51,7 @@ ruz cache              # cache location and size
   batch 3.4×, 40MB text pipeline 3×). SHA-256/AES on big blocks: Python's
   OpenSSL bindings can win — prefer Python there.
 - **Shared dep cache**: serde compiled by script A is reused by script B.
-  Edit-and-rerun: 0.13–0.6s; new script with warmed deps: ~0.7s.
+  Unchanged rerun is a 3ms `execve`. Edit-and-rebuild a no-dep script: ~0.11s.
 - **Errors teach**: rustc diagnostics return in ~0.2s with line numbers and
   fix suggestions — measured fix-iteration count is on par with Python.
 - **Default O3**: dodges the debug-profile 10–20× trap.
@@ -61,8 +61,11 @@ ruz cache              # cache location and size
 - Windows is **not supported** (design boundary, not a bug).
 - Uses `cargo -Zscript` (RUSTC_BOOTSTRAP=1 on stable; auto-falls back to
   `cargo +nightly` if that ever stops working).
-- Cross-script interference: all scripts share one `CARGO_TARGET_DIR` cache —
-  `ruz cache` shows it, blow it away if a dep graph goes weird.
+- All scripts still share one `CARGO_TARGET_DIR` so dependencies reuse. Package
+  names are rewritten to `ruz_<stem>_<hash12>` before compile, so two scripts
+  both named `hello` no longer collide on fingerprints.
+- Hot `run` keys on script bytes + toolchain sidecar + RUSTFLAGS/profile — not
+  path or mtime.
 
 ## Always-fresh reference
 

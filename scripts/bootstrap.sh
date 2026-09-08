@@ -5,7 +5,7 @@
 #   curl -fsSL https://github.com/spraylee/ruz/releases/latest/download/bootstrap.sh | sh
 #
 # 环境变量：
-#   RUZ_VERSION     钉死 tag，如 v0.1.0；空则 302 探测 latest
+#   RUZ_VERSION     钉死 tag，如 v0.2.0；空则 302 探测 latest
 #   RUZ_INSTALL_DIR 默认 ~/.local/bin
 
 set -eu
@@ -23,16 +23,22 @@ command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v uname >/dev/null 2>&1 || fail "需要 uname"
 command -v awk >/dev/null 2>&1 || fail "需要 awk"
 
-# 不支持 Windows（git-bash/WSL 里跑会在这里被拦下或自然失败）
 OS=$(uname -s)
 case "$OS" in
-  Linux|Darwin) ;;
+  Linux) vendor="unknown-linux-musl" ;;
+  Darwin) vendor="apple-darwin" ;;
   *) fail "不支持的平台 $OS（ruz 支持 Linux/macOS）" ;;
 esac
 
-if ! command -v python3 >/dev/null 2>&1; then
-  fail "需要 python3（ruz 是单文件 Python 工具）"
-fi
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64) ARCH="x86_64" ;;
+  aarch64|arm64) ARCH="aarch64" ;;
+  *) fail "不支持的架构 $ARCH（ruz 支持 x86_64/aarch64）" ;;
+esac
+
+TARGET="${ARCH}-${vendor}"
+ASSET="ruz-${TARGET}"
 
 query_latest_version() {
   loc=$(curl -fsSI "https://github.com/${REPOSITORY}/releases/latest" 2>/dev/null \
@@ -56,7 +62,7 @@ resolve_version() {
     return 0
   fi
   v=$(query_latest_version)
-  [ -n "$v" ] || fail "无法探测 latest tag（可 export RUZ_VERSION=v0.1.0 钉死）"
+  [ -n "$v" ] || fail "无法探测 latest tag（可 export RUZ_VERSION=v0.2.0 钉死）"
   printf '%s\n' "$v"
 }
 
@@ -66,19 +72,17 @@ BASE="https://github.com/${REPOSITORY}/releases/download/${TAG}"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-printf '%s\n' "[ruz] installing ${TAG} -> ${INSTALL_DIR}"
+printf '%s\n' "[ruz] installing ${TAG} ${ASSET} -> ${INSTALL_DIR}"
 
-# 单文件资产，无平台矩阵
-curl -fsSL "${BASE}/ruz" -o "${TMP}/ruz"
-if [ -f "${BASE}/SHA256SUMS" ] 2>/dev/null; then :; fi
+curl -fsSL "${BASE}/${ASSET}" -o "${TMP}/${ASSET}"
 curl -fsSL "${BASE}/SHA256SUMS" -o "${TMP}/SHA256SUMS" 2>/dev/null || true
 if [ -s "${TMP}/SHA256SUMS" ]; then
-  want=$(awk '$2=="ruz" {print $1}' "${TMP}/SHA256SUMS")
+  want=$(awk -v n="$ASSET" '$2==n {print $1}' "${TMP}/SHA256SUMS")
   if [ -n "$want" ]; then
     if command -v sha256sum >/dev/null 2>&1; then
-      got=$(sha256sum "${TMP}/ruz" | awk '{print $1}')
+      got=$(sha256sum "${TMP}/${ASSET}" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
-      got=$(shasum -a 256 "${TMP}/ruz" | awk '{print $1}')
+      got=$(shasum -a 256 "${TMP}/${ASSET}" | awk '{print $1}')
     else
       got=""
       printf '%s\n' "[ruz] 无 sha256 工具，跳过校验" >&2
@@ -92,7 +96,7 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 # 原子落位：先写临时名再 mv
-cp "${TMP}/ruz" "${INSTALL_DIR}/ruz.new"
+cp "${TMP}/${ASSET}" "${INSTALL_DIR}/ruz.new"
 chmod +x "${INSTALL_DIR}/ruz.new"
 mv "${INSTALL_DIR}/ruz.new" "${INSTALL_DIR}/ruz"
 
@@ -104,7 +108,6 @@ case ":${PATH}:" in
     ;;
 esac
 
-# 装完自检
 if "${INSTALL_DIR}/ruz" --version >/dev/null 2>&1; then
   printf '%s\n' "[ruz] $(${INSTALL_DIR}/ruz --version) installed ok"
 else

@@ -169,7 +169,7 @@
     </div>
     <div class="cta">
       <a class="fill" href="https://github.com/spraylee/ruz#readme">Get started</a>
-      <span class="quiet">needs python3 + cargo · MIT</span>
+      <span class="quiet">needs cargo · MIT</span>
     </div>
   </section>
 
@@ -194,7 +194,7 @@ fn main() {
         <div><span class="n">01</span>Shebang marks it a cargo single-file package (RFC 3502) — future cargo stable runs it natively.</div>
         <div><span class="n">02</span>The manifest block: your deps travel with the script. No Cargo.toml, no project dir.</div>
         <div><span class="n">03</span>Just Rust. Anything on crates.io works.</div>
-        <div><span class="n">04</span>Run it: <span class="mono" style="font-size:13px">ruz run fetch.rs</span> — first run compiles, every run after is ~0.3s.</div>
+        <div><span class="n">04</span>Run it: <span class="mono" style="font-size:13px">ruz run fetch.rs</span> — first no-dep compile ~0.19s; unchanged rerun is a 3ms execve.</div>
       </div>
     </div>
   </figure>
@@ -208,9 +208,9 @@ fn main() {
         <p>rustc diagnostics return in ~0.2s with line numbers and the fix spelled out. The borrow-checker teaches; the model listens.</p>
       </div>
       <div class="cell">
-        <div class="big">0.3–0.7s</div>
-        <h3>Edit &amp; rerun</h3>
-        <p>Change a few lines, rerun: 0.13–0.6s. Brand-new script on warm deps: 0.7s. Deps compile once, shared across all scripts.</p>
+        <div class="big">3ms</div>
+        <h3>Hot rerun</h3>
+        <p>Unchanged script: 3.04ms p50 via execve. Edit a line and rebuild: 108ms. First no-dep compile: 192ms. Deps compile once, shared across all scripts.</p>
       </div>
       <div class="cell">
         <div class="big">1.1×</div>
@@ -249,13 +249,13 @@ fn main() {
       <div class="row"><div class="cmd"><span class="c">$</span>ruz check fetch.rs</div><div class="desc">Fast type &amp; borrow check, no binary produced. Ideal pre-flight for agents.</div></div>
       <div class="row"><div class="cmd"><span class="c">$</span>ruz warm serde:derive reqwest:blocking</div><div class="desc">Pre-compile crates into the shared cache once; every future script starts warm.</div></div>
       <div class="row"><div class="cmd"><span class="c">$</span>ruz new demo.rs</div><div class="desc">Scaffold a script with edition pinned (no warnings).</div></div>
-      <div class="row"><div class="cmd"><span class="c">$</span>ruz doctor</div><div class="desc">Environment check: python3, cargo, -Zscript path, nightly fallback.</div></div>
+      <div class="row"><div class="cmd"><span class="c">$</span>ruz doctor</div><div class="desc">Environment check: cargo, -Zscript path, nightly fallback.</div></div>
       <div class="row"><div class="cmd"><span class="c">$</span>ruz cache</div><div class="desc">Where the cache lives and how big it is. Delete the dir to reset.</div></div>
     </div>
   </figure>
 
   <footer>
-    <span>RUZ v0.1.1 · MIT · SPRAYLEE</span>
+    <span>RUZ v0.2.0 · MIT · SPRAYLEE</span>
     <span>GITHUB.COM/SPRAYLEE/RUZ · LINUX / MACOS</span>
   </footer>
 </div>
