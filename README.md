@@ -67,6 +67,20 @@ ruz cache              # 缓存位置与大小
 
 **AI 迭代循环**：改几行重跑 0.13~0.6s；全新脚本（依赖已预热）0.7s。修复轮次实测与 Python 打平（rustc 报错自带答案）。
 
+## For AI agents
+
+This repo ships a skill (root `SKILL.md`) and a live-docs endpoint, so agents
+never rely on stale instructions:
+
+```sh
+npx skills add spraylee/ruz -g            # install the thin-pointer skill
+curl -fsSL https://ruz.spraylee.com/llms.txt     # always-fresh docs
+```
+
+The skill is deliberately **thin** (single file, rarely changes) and points
+here for anything version-specific. `npx skills update` keeps it in sync with
+the repo's main branch.
+
 ## 不支持
 
 - Windows（设计边界，非缺陷）
